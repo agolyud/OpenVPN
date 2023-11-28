@@ -11,9 +11,6 @@ import android.os.RemoteException
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
@@ -30,229 +27,104 @@ import de.blinkt.openvpn.core.VpnStatus
 import kotlinx.android.synthetic.main.fragment_main.*
 import java.io.IOException
 
-class MainFragment : Fragment(), View.OnClickListener {
-    private var server: Server? = null
+class MainFragment : Fragment() {
+    private lateinit var server: Server
+    private lateinit var connection: CheckInternetConnection
+    private var vpnStart = false
+    private lateinit var preference: SharedPreference
 
-    private var connection: CheckInternetConnection? = null
-    var vpnStart = false
-    private var preference: SharedPreference? = null
-
-
-
-
-
-    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?,
-                              savedInstanceState: Bundle?): View {
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         val view: View = inflater.inflate(R.layout.fragment_main, container, false)
         initializeAll()
         return view
-
-
-
     }
 
-    /**
-     * Initialize all variable and object
-     */
     private fun initializeAll() {
         preference = SharedPreference(requireContext())
-
-        server = preference!!.getServer()
-
-        val staticServer=StaticServer(requireContext(),server!!)
-        // Update current selected server icon
+        server = preference.getServer()
         connection = CheckInternetConnection()
         LocalBroadcastManager.getInstance(requireActivity()).registerReceiver(broadcastReceiver, IntentFilter("connectionState"))
     }
 
-
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-        vpnBtn.setOnClickListener(this)
-//        vpnBtn
-
-        // Checking is vpn already running or not
         isServiceRunning
         VpnStatus.initLogCache(requireActivity().cacheDir)
     }
 
-    /**
-     * @param v: click listener view
-     */
-    override fun onClick(v: View) {
-        when (v.id) {
-            R.id.vpnBtn ->                 // Vpn is running, user would like to disconnect current connection.
-                if (vpnStart) {
-                    confirmDisconnect()
-                } else {
-                    prepareVpn()
-                }
-        }
+    override fun onPause() {
+        super.onPause()
+        stopVpn()
     }
 
-    /**
-     * Show show disconnect confirm dialog
-     */
-    fun confirmDisconnect() {
-        val builder = AlertDialog.Builder(requireActivity())
-        builder.setMessage(requireActivity().getString(R.string.connection_close_confirm))
-        builder.setPositiveButton(requireActivity().getString(R.string.yes)) { dialog, id -> stopVpn() }
-        builder.setNegativeButton(requireActivity().getString(R.string.no)) { dialog, id ->
-            // User cancelled the dialog
-        }
-
-        // Create the AlertDialog
-        val dialog = builder.create()
-        dialog.show()
+    override fun onResume() {
+        super.onResume()
+        prepareVpn()
     }
 
-    /**
-     * Prepare for vpn connect with required permission
-     */
     private fun prepareVpn() {
-        if (!vpnStart) {
-            if (internetStatus) {
-
-                // Checking permission for network monitor
+        when {
+            !vpnStart && internetStatus -> {
                 val intent = VpnService.prepare(context)
-                if (intent != null) {
-                    startActivityForResult(intent, 1)
-                } else startVpn() //have already permission
-
-                // Update confection status
-                status("connecting")
-            } else {
-
-                // No internet connection available
-                showToast("you have no internet connection !!")
+                if (intent != null) startActivityForResult(intent, 1) else startVpn()
             }
-        } else if (stopVpn()) {
-
-            // VPN is stopped, show a Toast message.
-            showToast("Disconnect Successfully")
+            !vpnStart -> showToast("you have no internet connection !!")
+            stopVpn() -> showToast("Disconnect Successfully")
         }
     }
 
-    /**
-     * Stop vpn
-     * @return boolean: VPN status
-     */
     fun stopVpn(): Boolean {
-        try {
+        return try {
             OpenVPNThread.stop()
-            status("connect")
             vpnStart = false
-            return true
-        }
-        catch (e: Exception) {
+            true
+        } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
-        return false
     }
 
-    /**
-     * Taking permission for network access
-     */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (resultCode == Activity.RESULT_OK) {
-
-            //Permission granted, start the VPN
-            startVpn()
-        } else {
-            showToast("Permission Deny !! ")
-        }
+        if (resultCode == Activity.RESULT_OK) startVpn() else showToast("Permission Deny !! ")
     }
 
-    /**
-     * Internet connection status.
-     */
     val internetStatus: Boolean
-        get() = connection!!.netCheck(context)
+        get() = connection.netCheck(context)
 
-    /**
-     * Get service status
-     */
     val isServiceRunning: Unit
-        get() {
-            setStatus(OpenVPNService.getStatus())
-        }
+        get() = setStatus(OpenVPNService.getStatus())
 
-    /**
-     * Start the VPN
-     */
     private fun startVpn() {
         try {
-            // .ovpn file
-            OpenVpnApi.startVpn(context, server!!.getConnectionString(context), server!!.country, server!!.ovpnUserName, server!!.ovpnUserPassword)
+            OpenVpnApi.startVpn(context, server.getConnectionString(context), server.country, server.ovpnUserName, server.ovpnUserPassword)
             logTv.text = "Connecting..."
             vpnStart = true
-        }
-        catch (e: IOException) {
+        } catch (e: IOException) {
             e.printStackTrace()
-        }
-        catch (e: RemoteException) {
+        } catch (e: RemoteException) {
             e.printStackTrace()
         }
     }
 
-
-    /**
-     * Status change with corresponding vpn connection status
-     * @param connectionState
-     */
     fun setStatus(connectionState: String?) {
-        if (connectionState != null) when (connectionState) {
+        when (connectionState) {
             "DISCONNECTED" -> {
-                status("connect")
                 vpnStart = false
                 OpenVPNService.setDefaultStatus()
-                logTv.setText("")
+                logTv.text = ""
             }
             "CONNECTED" -> {
-                vpnStart = true // it will use after restart this activity
-                status("connected")
-                logTv.setText("")
+                vpnStart = true
+                logTv.text = ""
             }
-            "WAIT" -> logTv.setText("waiting for server connection!!")
-            "AUTH" -> logTv.setText("server authenticating!!")
-            "RECONNECTING" -> {
-                status("connecting")
-                logTv.setText("Reconnecting...")
-            }
-            "NONETWORK" -> logTv.setText("No network connection")
+            "WAIT" -> logTv.text = "waiting for server connection!!"
+            "AUTH" -> logTv.text = "server authenticating!!"
+            "RECONNECTING" -> logTv.text = "Reconnecting..."
+            "NONETWORK" -> logTv.text = "No network connection"
         }
     }
 
-    /**
-     * Change button background color and text
-     * @param status: VPN current status
-     */
-    fun status(status: String) {
-        if (status == "connect") {
-            vpnBtn.setText(requireContext().getString(R.string.connect))
-        } else if (status == "connecting") {
-            vpnBtn.setText(requireContext().getString(R.string.connecting))
-        } else if (status == "connected") {
-            vpnBtn.setText(requireContext().getString(R.string.disconnect))
-        } else if (status == "tryDifferentServer") {
-            vpnBtn.setBackgroundResource(R.drawable.button_connected)
-            vpnBtn.setText("Try Different\nServer")
-        } else if (status == "loading") {
-            vpnBtn.setBackgroundResource(R.drawable.button)
-            vpnBtn.setText("Loading Server..")
-        } else if (status == "invalidDevice") {
-            vpnBtn.setBackgroundResource(R.drawable.button_connected)
-            vpnBtn.setText("Invalid Device")
-        } else if (status == "authenticationCheck") {
-            vpnBtn.setBackgroundResource(R.drawable.button_connecting)
-            vpnBtn.setText("Authentication \n Checking...")
-        }
-    }
-
-    /**
-     * Receive broadcast message
-     */
     var broadcastReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             try {
@@ -280,43 +152,8 @@ class MainFragment : Fragment(), View.OnClickListener {
 
 
 
-    /**
-     * Show toast message
-     * @param message: toast message
-     */
     fun showToast(message: String?) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-
-    /**
-     * VPN server country icon change
-     * @param serverIcon: icon URL
-     */
-    fun updateCurrentServerIcon(serverIcon: String?) {
-
-    }
-
-    /**
-     * Change server when user select new server
-     * @param server ovpn server details
-     */
-
-
-    override fun onResume() {
-        if (server == null) {
-            server = preference!!.getServer()
-        }
-        super.onResume()
-    }
-
-    /**
-     * Save current selected server on local shared preference
-     */
-    override fun onStop() {
-        if (server != null) {
-            preference!!.saveServer(server!!)
-        }
-        super.onStop()
-    }
 }

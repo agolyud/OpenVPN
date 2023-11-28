@@ -1,2 +1,2 @@
 include ':app', ':vpnLib'
-rootProject.name='HolyFast VPN'
+rootProject.name='OpenVPN lite Client'

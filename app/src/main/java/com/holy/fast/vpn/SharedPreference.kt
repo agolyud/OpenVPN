@@ -38,7 +38,7 @@ class SharedPreference(context: Context) {
     private val assetServer: Server
         get() {
             return AssetServer(
-                    "India",
+                    "OpenVpn",
                     "1.ovpn",
                     "",
                     "")
